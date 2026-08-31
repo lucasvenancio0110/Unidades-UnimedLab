@@ -1,0 +1,75 @@
+name: Generate static unit coordinates
+
+on:
+  push:
+    paths:
+      - '.github/workflows/geocode-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  geocode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Geocode all units
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const units = [
+            ['mega','Avenida Iguaçu, 1815, Água Verde, Curitiba, PR, Brasil'],
+            ['ahu','Avenida Anita Garibaldi, 2893, Ahú, Curitiba, PR, Brasil'],
+            ['bacacheri','Rua Nicarágua, 847, Bacacheri, Curitiba, PR, Brasil'],
+            ['bairro-alto','Rua Alberico Flores Bueno, 438, Bairro Alto, Curitiba, PR, Brasil'],
+            ['cajuru','Rua Vicente de Carvalho, 113, Cajuru, Curitiba, PR, Brasil'],
+            ['centro','Rua Emiliano Perneta, 466, Centro, Curitiba, PR, Brasil'],
+            ['fazendinha','Rua Carlos Klemtz, 1553, Fazendinha, Curitiba, PR, Brasil'],
+            ['germano-mayer','Rua Padre Germano Mayer, 840, Alto da XV, Curitiba, PR, Brasil'],
+            ['itupava','Rua Itupava, 737, Alto da XV, Curitiba, PR, Brasil'],
+            ['palladium','Avenida Presidente Kennedy, 4121, Portão, Curitiba, PR, Brasil'],
+            ['portao','Avenida Presidente Arthur da Silva Bernardes, 2285, Portão, Curitiba, PR, Brasil'],
+            ['santa-felicidade','Rua Domingos Strapasson, 100, Santa Felicidade, Curitiba, PR, Brasil'],
+            ['sitio-cercado','Rua Nova Aurora, 1770, Sítio Cercado, Curitiba, PR, Brasil'],
+            ['xaxim','Rua Francisco Derosso, 3488, Xaxim, Curitiba, PR, Brasil'],
+            ['hospital-fatima','Avenida Visconde de Guarapuava, 3077, Centro, Curitiba, PR, Brasil'],
+            ['parkshopping-barigui','Rua Professor Pedro Viriato Parigot de Souza, 600, Mossunguê, Curitiba, PR, Brasil'],
+            ['shopping-mueller','Avenida Cândido de Abreu, 127, Centro Cívico, Curitiba, PR, Brasil'],
+            ['emiliano-perneta','Rua Emiliano Perneta, 756, Centro, Curitiba, PR, Brasil'],
+            ['pinhais','Avenida Jacob Macanhan, 736, Pinhais, PR, Brasil'],
+            ['campo-largo','Rua Marechal Deodoro, 477, Campo Largo, PR, Brasil'],
+            ['fazenda-rio-grande','Rua César Carelli, 122, Fazenda Rio Grande, PR, Brasil'],
+            ['araucaria-centro','Avenida Doutor Victor do Amaral, 523, Araucária, PR, Brasil'],
+            ['araucaria-iguacu','Rua Miguel Bertolino Pizatto, 1901, Araucária, PR, Brasil'],
+            ['afonso-pena','Avenida Rui Barbosa, 4910, São José dos Pinhais, PR, Brasil'],
+            ['shopping-sao-jose','Rua Izabel A Redentora, 1434, São José dos Pinhais, PR, Brasil']
+          ];
+          const endpoint = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates';
+          async function geocode([id, address]) {
+            const p = new URLSearchParams({ f:'json', SingleLine:address, outFields:'Match_addr', countryCode:'BRA', maxLocations:'1', location:'-49.28,-25.44', distance:'100000' });
+            const res = await fetch(`${endpoint}?${p}`);
+            if (!res.ok) throw new Error(`${id}: HTTP ${res.status}`);
+            const json = await res.json();
+            const c = json.candidates?.[0];
+            if (!c?.location) throw new Error(`${id}: no candidate`);
+            console.log(id, c.score, c.address, c.location.y, c.location.x);
+            return [id, { lat: Number(c.location.y.toFixed(6)), lng: Number(c.location.x.toFixed(6)), score: c.score }];
+          }
+          const pairs = [];
+          for (let i = 0; i < units.length; i += 5) {
+            pairs.push(...await Promise.all(units.slice(i, i + 5).map(geocode)));
+          }
+          const coords = Object.fromEntries(pairs);
+          const content = `// Generated once from ArcGIS World Geocoding Service.\n// Do not geocode these units at runtime.\nexport const UNIT_COORDS = ${JSON.stringify(coords, null, 2)};\n`;
+          fs.writeFileSync('data/coords.js', content);
+          NODE
+      - name: Commit generated coordinates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/coords.js
+          git commit -m "data: pin unit coordinates for instant load" || exit 0
+          git push
