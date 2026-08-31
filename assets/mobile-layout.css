@@ -1,0 +1,62 @@
+/* Mobile map-first layout
+   Mantém o mapa como área principal durante o atendimento e deixa
+   o painel de referência mais abaixo, como um bottom sheet. */
+
+@media (max-width: 900px) {
+  .workspace {
+    min-height: calc(100svh - 64px);
+  }
+
+  .map-area {
+    /* Antes: 52vh. Agora o mapa ocupa quase toda a primeira tela. */
+    height: 72svh;
+    min-height: 520px;
+    max-height: 760px;
+    flex: 0 0 auto;
+  }
+
+  .panel {
+    padding-top: 0;
+  }
+
+  .search-card {
+    /* Pequena sobreposição para manter a sensação de bottom sheet,
+       sem cobrir uma parte relevante do mapa. */
+    margin-top: -16px;
+    padding-top: 22px;
+    border-radius: 24px 24px 20px 20px;
+  }
+
+  .search-card::before {
+    content: "";
+    display: block;
+    width: 44px;
+    height: 5px;
+    margin: -10px auto 13px;
+    border-radius: 999px;
+    background: #d4dfdd;
+  }
+
+  .map-hint {
+    bottom: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .map-area {
+    height: 74svh;
+    min-height: 540px;
+  }
+
+  .search-card {
+    margin-top: -14px;
+  }
+}
+
+/* Em telas muito baixas, evita um mapa exageradamente alto. */
+@media (max-width: 900px) and (max-height: 700px) {
+  .map-area {
+    height: 68svh;
+    min-height: 455px;
+  }
+}
