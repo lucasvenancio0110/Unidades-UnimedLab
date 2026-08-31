@@ -43,8 +43,8 @@
             </div>
             <button class="primary-btn" id="searchButton" type="submit">Buscar no mapa</button>
           </form>
-          <div class="quick-actions">
-            <button class="secondary-btn" id="myLocationButton" type="button"><span aria-hidden="true">◎</span> Minha localização</button>
+          <div class="quick-actions" style="grid-template-columns: 1fr;">
+            <button class="secondary-btn" id="myLocationButton" type="button" hidden aria-hidden="true" tabindex="-1"></button>
             <button class="secondary-btn" id="clickMapModeButton" type="button"><span aria-hidden="true">⌖</span> Marcar no mapa</button>
           </div>
           <div id="searchStatus" class="search-status" aria-live="polite"></div>
