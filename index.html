@@ -2,13 +2,27 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f5f5a" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7faf9" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="description" content="Mapa de apoio para localizar unidades da Unimed Laboratório em Curitiba e Região Metropolitana." />
   <title>UnimedLab • Mapa de unidades</title>
+
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
+  <link rel="dns-prefetch" href="https://geocode.arcgis.com" />
+  <link rel="dns-prefetch" href="https://geocuritiba.ippuc.org.br" />
+
+  <link rel="modulepreload" href="./assets/app.js" />
+  <link rel="modulepreload" href="./data/unidades.js" />
+  <link rel="modulepreload" href="./data/coords.js" />
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="./assets/styles.css" />
   <link rel="stylesheet" href="./assets/mobile-layout.css" />
 </head>
@@ -34,19 +48,22 @@
         </section>
 
         <section class="search-card" aria-labelledby="search-title">
-          <div class="section-heading"><div><p class="eyebrow" id="search-title">Local de referência</p><h3>Onde a pessoa está?</h3></div></div>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow" id="search-title">Local de referência</p>
+              <h3>Onde a pessoa está?</h3>
+            </div>
+          </div>
+
           <form id="placeSearchForm" class="search-form">
             <div class="search-input-wrap">
               <span class="search-icon" aria-hidden="true">⌕</span>
-              <input id="placeSearchInput" type="search" autocomplete="off" placeholder="Ex.: Jardim das Américas, Shopping Estação..." aria-label="Pesquisar local de referência" />
+              <input id="placeSearchInput" type="search" autocomplete="off" autocapitalize="words" placeholder="Ex.: Jardim das Américas, Shopping Estação..." aria-label="Pesquisar local de referência" />
               <button class="clear-input" id="clearPlaceSearch" type="button" aria-label="Limpar pesquisa">×</button>
             </div>
             <button class="primary-btn" id="searchButton" type="submit">Buscar no mapa</button>
           </form>
-          <div class="quick-actions" hidden aria-hidden="true">
-            <button class="secondary-btn" id="myLocationButton" type="button" tabindex="-1"></button>
-            <button class="secondary-btn" id="clickMapModeButton" type="button" tabindex="-1"></button>
-          </div>
+
           <div id="searchStatus" class="search-status" aria-live="polite"></div>
           <div id="searchSuggestions" class="suggestions" hidden></div>
         </section>
@@ -81,19 +98,17 @@
       <section class="map-area" aria-label="Mapa das unidades">
         <div id="map"></div>
         <div class="map-toolbar" aria-label="Camadas do mapa">
-          <button id="toggleNeighborhoodsButton" class="map-chip active" type="button" aria-pressed="true"><span class="chip-swatch neighborhood-swatch"></span>Bairros</button>
-          <button id="toggleMunicipalitiesButton" class="map-chip active" type="button" aria-pressed="true"><span class="chip-swatch city-swatch"></span>Municípios</button>
+          <button id="toggleNeighborhoodsButton" class="map-chip" type="button" aria-pressed="false" disabled><span class="chip-swatch neighborhood-swatch"></span>Bairros</button>
+          <button id="toggleMunicipalitiesButton" class="map-chip" type="button" aria-pressed="false" disabled><span class="chip-swatch city-swatch"></span>Municípios</button>
           <button id="toggleUnitsButton" class="map-chip active" type="button" aria-pressed="true"><span class="chip-swatch unit-swatch"></span>Unidades</button>
         </div>
-        <div id="mapHint" class="map-hint" hidden>Toque no mapa para marcar o local de referência<button id="cancelMapPickButton" type="button" aria-label="Cancelar marcação no mapa">×</button></div>
-        <div id="loadingOverlay" class="loading-overlay"><div class="loader"></div><div><strong>Preparando o mapa</strong><span id="loadingText">Localizando as unidades…</span></div></div>
       </section>
     </main>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="./assets/app.js"></script>
 </body>
 </html>
