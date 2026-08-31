@@ -17,7 +17,9 @@ const state = {
   activeCity: 'Todas',
   filter: '',
   markers: new Map(),
-  bairrosGeo: null
+  bairrosGeo: null,
+  animationToken: 0,
+  highlightedUnitId: null
 };
 
 const els = {
@@ -64,6 +66,7 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const unitLayer = L.layerGroup().addTo(map);
 const refLayer = L.layerGroup().addTo(map);
+const recommendationLayer = L.layerGroup().addTo(map);
 let bairroLayer = null;
 let municipioLayer = null;
 
@@ -212,6 +215,104 @@ function nearestUnits() {
     .slice(0, 3);
 }
 
+function clearRecommendation() {
+  state.animationToken += 1;
+  recommendationLayer.clearLayers();
+
+  if (state.highlightedUnitId) {
+    const previous = state.markers.get(state.highlightedUnitId);
+    previous?.getElement()?.classList.remove('nearest-highlight');
+  }
+  state.highlightedUnitId = null;
+}
+
+function animateNearestRecommendation(ref, nearest) {
+  clearRecommendation();
+  if (!nearest.length) return;
+
+  const best = nearest[0];
+  const unit = best.unit;
+  const marker = state.markers.get(unit.id);
+  if (!marker) return;
+
+  if (!map.hasLayer(unitLayer)) {
+    unitLayer.addTo(map);
+    els.unitsBtn.classList.add('active');
+    els.unitsBtn.setAttribute('aria-pressed', 'true');
+  }
+
+  const routeLine = L.polyline(
+    [[ref.lat, ref.lng], [unit.lat, unit.lng]],
+    {
+      color: '#0f6b63',
+      weight: 4,
+      opacity: 0.82,
+      dashArray: '4 10',
+      lineCap: 'round',
+      interactive: false,
+      className: 'nearest-guide-line'
+    }
+  ).addTo(recommendationLayer);
+
+  L.circleMarker([unit.lat, unit.lng], {
+    radius: 19,
+    color: '#0f6b63',
+    weight: 2,
+    opacity: 0.32,
+    fillColor: '#0f6b63',
+    fillOpacity: 0.08,
+    interactive: false,
+    className: 'nearest-guide-halo'
+  }).addTo(recommendationLayer);
+
+  routeLine.bringToBack();
+  state.highlightedUnitId = unit.id;
+  requestAnimationFrame(() => marker.getElement()?.classList.add('nearest-highlight'));
+
+  const token = ++state.animationToken;
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const mapArea = document.querySelector('.map-area');
+
+  if (innerWidth <= 900) {
+    mapArea?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  const openBest = () => {
+    if (token !== state.animationToken) return;
+    marker.openPopup();
+  };
+
+  if (reducedMotion) {
+    map.fitBounds(L.latLngBounds([[ref.lat, ref.lng], [unit.lat, unit.lng]]), {
+      padding: [54, 54],
+      maxZoom: 16
+    });
+    setTimeout(openBest, 80);
+    return;
+  }
+
+  if (best.distance < 0.8) {
+    map.flyToBounds(L.latLngBounds([[ref.lat, ref.lng], [unit.lat, unit.lng]]), {
+      paddingTopLeft: [38, 80],
+      paddingBottomRight: [38, 110],
+      maxZoom: 16,
+      duration: 0.75,
+      easeLinearity: 0.22
+    });
+    setTimeout(openBest, 820);
+    return;
+  }
+
+  map.flyTo([ref.lat, ref.lng], 15, { duration: 0.46, easeLinearity: 0.24 });
+
+  setTimeout(() => {
+    if (token !== state.animationToken) return;
+    map.flyTo([unit.lat, unit.lng], 16, { duration: 0.86, easeLinearity: 0.2 });
+  }, 520);
+
+  setTimeout(openBest, 1450);
+}
+
 function pointInRing(point, ring) {
   const [x, y] = point;
   let inside = false;
@@ -260,7 +361,7 @@ function setReference(ref) {
   const nearest = nearestUnits();
   els.nearest.hidden = false;
   els.nearestList.innerHTML = nearest.map(({ unit, distance }, index) => `
-    <article class="nearest-item">
+    <article class="nearest-item ${index === 0 ? 'recommended' : ''}">
       <div class="rank">${index + 1}</div>
       <div><strong>${esc(unit.name)}</strong><span>${esc(unit.neighborhood)} • ${esc(unit.city)}</span><small>${esc(unit.address)}</small>
         <div class="nearest-actions"><button data-nfocus="${unit.id}" type="button">Ver no mapa</button><a href="${route(unit)}" target="_blank" rel="noopener">Rota</a><button data-copy="${unit.id}" type="button">Copiar endereço</button></div>
@@ -271,12 +372,11 @@ function setReference(ref) {
   els.nearestList.querySelectorAll('[data-nfocus]').forEach(button => button.addEventListener('click', () => selectUnit(button.dataset.nfocus, true)));
   els.nearestList.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', () => copyUnit(button.dataset.copy)));
 
-  const points = [[ref.lat, ref.lng], ...nearest.map(({ unit }) => [unit.lat, unit.lng])];
-  map.fitBounds(L.latLngBounds(points), { padding: [42, 42], maxZoom: 14 });
-  if (innerWidth <= 900) document.querySelector('.map-area')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  animateNearestRecommendation(ref, nearest);
 }
 
 function clearReference() {
+  clearRecommendation();
   state.ref = null;
   refLayer.clearLayers();
   els.nearest.hidden = true;
