@@ -1,131 +1,630 @@
 import { UNIDADES, CITIES } from '../data/unidades.js';
+import { UNIT_COORDS } from '../data/coords.js';
 
 const CFG = {
-  center: [-25.445, -49.285], zoom: 10,
+  center: [-25.445, -49.285],
+  zoom: 10,
   geocoder: 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates',
   bairros: 'https://geocuritiba.ippuc.org.br/server/rest/services/GeoCuritiba/Publico_Interno_GeoCuritiba_BaseCartografica_para_BC/MapServer/44/query',
-  municipios: 'https://geocuritiba.ippuc.org.br/server/rest/services/GeoCuritiba/Publico_Interno_GeoCuritiba_BaseCartografica_para_BC/MapServer/43/query',
-  cache: 'unimedlab-coords-v4'
+  municipios: 'https://geocuritiba.ippuc.org.br/server/rest/services/GeoCuritiba/Publico_Interno_GeoCuritiba_BaseCartografica_para_BC/MapServer/43/query'
 };
 
-const $ = s => document.querySelector(s);
-const state = { units: UNIDADES.map(u => ({...u})), ref: null, activeCity: 'Todas', filter: '', pick: false, markers: new Map(), bairrosGeo: null };
+const $ = selector => document.querySelector(selector);
+
+const state = {
+  units: UNIDADES.map(unit => ({ ...unit, ...(UNIT_COORDS[unit.id] || {}) })),
+  ref: null,
+  activeCity: 'Todas',
+  filter: '',
+  markers: new Map(),
+  bairrosGeo: null
+};
+
 const els = {
-  form: $('#placeSearchForm'), input: $('#placeSearchInput'), clear: $('#clearPlaceSearch'), status: $('#searchStatus'), suggestions: $('#searchSuggestions'),
-  searchBtn: $('#searchButton'), locationBtn: $('#myLocationButton'), pickBtn: $('#clickMapModeButton'), cancelPick: $('#cancelMapPickButton'), hint: $('#mapHint'),
-  nearest: $('#nearestSection'), nearestList: $('#nearestList'), refLabel: $('#referenceLabel'), clearRef: $('#clearReferenceButton'),
-  cityFilters: $('#cityFilters'), unitFilter: $('#unitSearchInput'), unitsList: $('#unitsList'), unitsCount: $('#unitsCount'), fit: $('#fitAllButton'),
-  bairrosBtn: $('#toggleNeighborhoodsButton'), municipiosBtn: $('#toggleMunicipalitiesButton'), unitsBtn: $('#toggleUnitsButton'),
-  loading: $('#loadingOverlay'), loadingText: $('#loadingText'), toast: $('#toast')
+  form: $('#placeSearchForm'),
+  input: $('#placeSearchInput'),
+  clear: $('#clearPlaceSearch'),
+  status: $('#searchStatus'),
+  suggestions: $('#searchSuggestions'),
+  searchBtn: $('#searchButton'),
+  nearest: $('#nearestSection'),
+  nearestList: $('#nearestList'),
+  refLabel: $('#referenceLabel'),
+  clearRef: $('#clearReferenceButton'),
+  cityFilters: $('#cityFilters'),
+  unitFilter: $('#unitSearchInput'),
+  unitsList: $('#unitsList'),
+  unitsCount: $('#unitsCount'),
+  fit: $('#fitAllButton'),
+  bairrosBtn: $('#toggleNeighborhoodsButton'),
+  municipiosBtn: $('#toggleMunicipalitiesButton'),
+  unitsBtn: $('#toggleUnitsButton'),
+  toast: $('#toast')
 };
 
-const map = L.map('map', { minZoom: 8, maxZoom: 19, zoomControl: true }).setView(CFG.center, CFG.zoom);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
-const unitLayer = L.layerGroup().addTo(map), refLayer = L.layerGroup().addTo(map), bairroLabels = L.layerGroup().addTo(map), municipioLabels = L.layerGroup().addTo(map);
-let bairroLayer = null, municipioLayer = null;
+const map = L.map('map', {
+  minZoom: 8,
+  maxZoom: 19,
+  zoomControl: true,
+  preferCanvas: true,
+  fadeAnimation: false,
+  markerZoomAnimation: false,
+  zoomAnimation: true
+}).setView(CFG.center, CFG.zoom);
 
-const esc = (v='') => String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
-const norm = (v='') => v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
-const address = u => [u.address,u.neighborhood,u.city,'PR',u.cep,'Brasil'].filter(Boolean).join(', ');
-const gm = u => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(u.lat ? `${u.lat},${u.lng}` : address(u))}`;
-const route = u => { const p=new URLSearchParams({api:'1',destination:u.lat?`${u.lat},${u.lng}`:address(u),travelmode:'driving'}); if(state.ref) p.set('origin',`${state.ref.lat},${state.ref.lng}`); return `https://www.google.com/maps/dir/?${p}`; };
-const waze = u => `https://www.waze.com/ul?q=${encodeURIComponent(u.lat?`${u.lat},${u.lng}`:address(u))}&navigate=yes`;
+L.tileLayer('https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  updateWhenIdle: true,
+  updateWhenZooming: false,
+  keepBuffer: 2,
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+}).addTo(map);
 
-function pin(type='') { return L.divIcon({ className:'unit-pin', html:`<div class="unit-pin-inner ${type}"></div>`, iconSize:[32,38], iconAnchor:[16,34], popupAnchor:[0,-30] }); }
-const refIcon = L.divIcon({ className:'reference-pin', html:'<div class="reference-pin-inner"></div>', iconSize:[24,24], iconAnchor:[12,12] });
-function popup(u){ return `<div class="popup-title">${esc(u.name)}</div><div class="popup-address">${esc(u.address)}<br>${esc(u.neighborhood)} • ${esc(u.city)}${u.detail?`<br>${esc(u.detail)}`:''}</div><div class="popup-actions"><a href="${gm(u)}" target="_blank">Google Maps</a><a href="${route(u)}" target="_blank">Traçar rota</a></div>`; }
+const unitLayer = L.layerGroup().addTo(map);
+const refLayer = L.layerGroup().addTo(map);
+let bairroLayer = null;
+let municipioLayer = null;
 
-async function geocode(q, max=5){
-  const p=new URLSearchParams({f:'json',SingleLine:q,outFields:'Match_addr,City,Subregion,Region,Postal',countryCode:'BRA',maxLocations:String(max),location:'-49.28,-25.44',distance:'80000'});
-  const r=await fetch(`${CFG.geocoder}?${p}`); if(!r.ok) throw new Error('Busca indisponível');
-  const j=await r.json(); return (j.candidates||[]).map(c=>({label:c.address,lat:c.location?.y,lng:c.location?.x,score:c.score})).filter(x=>Number.isFinite(x.lat));
+const esc = (value = '') => String(value)
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
+
+const norm = (value = '') => value
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .trim();
+
+const googleMaps = unit =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${unit.lat},${unit.lng}`)}`;
+
+const route = unit => {
+  const params = new URLSearchParams({
+    api: '1',
+    destination: `${unit.lat},${unit.lng}`,
+    travelmode: 'driving'
+  });
+  if (state.ref) params.set('origin', `${state.ref.lat},${state.ref.lng}`);
+  return `https://www.google.com/maps/dir/?${params}`;
+};
+
+function pin(type = '') {
+  return L.divIcon({
+    className: 'unit-pin',
+    html: `<div class="unit-pin-inner ${type}"></div>`,
+    iconSize: [32, 38],
+    iconAnchor: [16, 34],
+    popupAnchor: [0, -30]
+  });
 }
 
-async function locateUnits(){
-  let cache={}; try{ cache=JSON.parse(localStorage.getItem(CFG.cache)||'{}'); }catch{}
-  for(const u of state.units) if(cache[u.id]) Object.assign(u,cache[u.id]);
-  const queue=state.units.filter(u=>!Number.isFinite(u.lat));
-  const workers=Array.from({length:Math.min(5,queue.length)},async()=>{ while(queue.length){ const u=queue.shift(); try{ let r=await geocode(`${u.name}, ${address(u)}`,1); if(!r.length) r=await geocode(address(u),1); if(r[0]) Object.assign(u,{lat:r[0].lat,lng:r[0].lng}); }catch(e){ console.warn(u.name,e); } } });
-  await Promise.all(workers);
-  const out={}; state.units.forEach(u=>{if(Number.isFinite(u.lat))out[u.id]={lat:u.lat,lng:u.lng};}); localStorage.setItem(CFG.cache,JSON.stringify(out));
+const refIcon = L.divIcon({
+  className: 'reference-pin',
+  html: '<div class="reference-pin-inner"></div>',
+  iconSize: [24, 24],
+  iconAnchor: [12, 12]
+});
+
+function popup(unit) {
+  return `
+    <div class="popup-title">${esc(unit.name)}</div>
+    <div class="popup-address">
+      ${esc(unit.address)}<br>
+      ${esc(unit.neighborhood)} • ${esc(unit.city)}
+      ${unit.detail ? `<br>${esc(unit.detail)}` : ''}
+    </div>
+    <div class="popup-actions">
+      <a href="${googleMaps(unit)}" target="_blank" rel="noopener">Google Maps</a>
+      <a href="${route(unit)}" target="_blank" rel="noopener">Traçar rota</a>
+    </div>`;
 }
 
-function drawUnits(){
-  unitLayer.clearLayers(); state.markers.clear();
-  state.units.forEach(u=>{ if(!Number.isFinite(u.lat)) return; const type=['shopping','hospital','mega','new'].includes(u.type)?u.type:''; const m=L.marker([u.lat,u.lng],{icon:pin(type),title:u.name}).bindPopup(popup(u)).on('click',()=>selectUnit(u.id,false)); m.addTo(unitLayer); state.markers.set(u.id,m); });
+function drawUnits() {
+  unitLayer.clearLayers();
+  state.markers.clear();
+
+  for (const unit of state.units) {
+    if (!Number.isFinite(unit.lat) || !Number.isFinite(unit.lng)) continue;
+    const type = ['shopping', 'hospital', 'mega', 'new'].includes(unit.type) ? unit.type : '';
+    const marker = L.marker([unit.lat, unit.lng], {
+      icon: pin(type),
+      title: unit.name,
+      keyboard: true
+    })
+      .bindPopup(popup(unit))
+      .on('click', () => selectUnit(unit.id, false))
+      .addTo(unitLayer);
+
+    state.markers.set(unit.id, marker);
+  }
 }
 
-function filtered(){ const q=norm(state.filter); return state.units.filter(u=>(state.activeCity==='Todas'||u.city===state.activeCity)&&(!q||norm(`${u.name} ${u.neighborhood} ${u.city} ${u.address}`).includes(q))); }
-function renderCities(){ els.cityFilters.innerHTML=CITIES.map(c=>`<button class="filter-chip ${c===state.activeCity?'active':''}" data-city="${esc(c)}">${esc(c)}</button>`).join(''); els.cityFilters.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.activeCity=b.dataset.city;renderCities();renderUnits();}); }
-function renderUnits(){
-  const list=filtered(); els.unitsCount.textContent=list.length;
-  els.unitsList.innerHTML=list.length?list.map(u=>`<article class="unit-card" data-unit="${u.id}"><div class="unit-top"><div><div class="unit-name">${esc(u.name)}</div><div class="unit-place">${esc(u.neighborhood)} • ${esc(u.city)}</div></div><span class="mini-pin"></span></div><div class="unit-address">${esc(u.address)}${u.detail?`<br>${esc(u.detail)}`:''}</div><div class="unit-actions"><button data-focus="${u.id}">Ver no mapa</button><a href="${gm(u)}" target="_blank">Google Maps</a></div></article>`).join(''):'<div class="empty-state">Nenhuma unidade encontrada.</div>';
-  els.unitsList.querySelectorAll('[data-focus]').forEach(b=>b.onclick=()=>selectUnit(b.dataset.focus,true));
+function filteredUnits() {
+  const query = norm(state.filter);
+  return state.units.filter(unit =>
+    (state.activeCity === 'Todas' || unit.city === state.activeCity) &&
+    (!query || norm(`${unit.name} ${unit.neighborhood} ${unit.city} ${unit.address}`).includes(query))
+  );
 }
 
-function selectUnit(id,zoom=true){ const u=state.units.find(x=>x.id===id),m=state.markers.get(id); if(!u||!m)return; if(zoom)map.flyTo([u.lat,u.lng],17,{duration:.7}); m.openPopup(); if(innerWidth<=900)document.querySelector('.map-area').scrollIntoView({behavior:'smooth'}); }
-function km(a,b){ const R=6371,d=Math.PI/180,dLat=(b.lat-a.lat)*d,dLng=(b.lng-a.lng)*d,s=Math.sin(dLat/2)**2+Math.cos(a.lat*d)*Math.cos(b.lat*d)*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(s)); }
-function nearest(){ if(!state.ref)return[]; return state.units.filter(u=>Number.isFinite(u.lat)).map(u=>({u,d:km(state.ref,u)})).sort((a,b)=>a.d-b.d).slice(0,3); }
+function renderCities() {
+  els.cityFilters.innerHTML = CITIES
+    .map(city => `<button class="filter-chip ${city === state.activeCity ? 'active' : ''}" data-city="${esc(city)}">${esc(city)}</button>`)
+    .join('');
 
-function neighborhoodAt(ref){
-  if(!state.bairrosGeo||!window.turf)return null;
-  const pt=turf.point([ref.lng,ref.lat]);
-  for(const f of state.bairrosGeo.features||[]){ try{ if(turf.booleanPointInPolygon(pt,f))return f.properties?.nome||null; }catch{} }
+  els.cityFilters.querySelectorAll('button').forEach(button => {
+    button.addEventListener('click', () => {
+      state.activeCity = button.dataset.city;
+      renderCities();
+      renderUnits();
+    });
+  });
+}
+
+function renderUnits() {
+  const list = filteredUnits();
+  els.unitsCount.textContent = String(list.length);
+
+  els.unitsList.innerHTML = list.length
+    ? list.map(unit => `
+      <article class="unit-card" data-unit="${unit.id}">
+        <div class="unit-top">
+          <div>
+            <div class="unit-name">${esc(unit.name)}</div>
+            <div class="unit-place">${esc(unit.neighborhood)} • ${esc(unit.city)}</div>
+          </div>
+          <span class="mini-pin" aria-hidden="true"></span>
+        </div>
+        <div class="unit-address">${esc(unit.address)}${unit.detail ? `<br>${esc(unit.detail)}` : ''}</div>
+        <div class="unit-actions">
+          <button data-focus="${unit.id}" type="button">Ver no mapa</button>
+          <a href="${googleMaps(unit)}" target="_blank" rel="noopener">Google Maps</a>
+        </div>
+      </article>`).join('')
+    : '<div class="empty-state">Nenhuma unidade encontrada.</div>';
+
+  els.unitsList.querySelectorAll('[data-focus]').forEach(button => {
+    button.addEventListener('click', () => selectUnit(button.dataset.focus, true));
+  });
+}
+
+function selectUnit(id, zoom = true) {
+  const unit = state.units.find(item => item.id === id);
+  const marker = state.markers.get(id);
+  if (!unit || !marker) return;
+
+  if (zoom) map.flyTo([unit.lat, unit.lng], 17, { duration: 0.55 });
+  marker.openPopup();
+
+  if (innerWidth <= 900) {
+    document.querySelector('.map-area')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function distanceKm(a, b) {
+  const earthRadius = 6371;
+  const degrees = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * degrees;
+  const dLng = (b.lng - a.lng) * degrees;
+  const value =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * degrees) *
+      Math.cos(b.lat * degrees) *
+      Math.sin(dLng / 2) ** 2;
+
+  return 2 * earthRadius * Math.asin(Math.sqrt(value));
+}
+
+function nearestUnits() {
+  if (!state.ref) return [];
+  return state.units
+    .filter(unit => Number.isFinite(unit.lat) && Number.isFinite(unit.lng))
+    .map(unit => ({ unit, distance: distanceKm(state.ref, unit) }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3);
+}
+
+function pointInRing(point, ring) {
+  const [x, y] = point;
+  let inside = false;
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersects =
+      yi > y !== yj > y &&
+      x < ((xj - xi) * (y - yi)) / ((yj - yi) || Number.EPSILON) + xi;
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function polygonContains(point, rings) {
+  if (!rings?.length || !pointInRing(point, rings[0])) return false;
+  return !rings.slice(1).some(ring => pointInRing(point, ring));
+}
+
+function featureContains(feature, ref) {
+  const geometry = feature?.geometry;
+  if (!geometry) return false;
+  const point = [ref.lng, ref.lat];
+
+  if (geometry.type === 'Polygon') {
+    return polygonContains(point, geometry.coordinates);
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.some(polygon => polygonContains(point, polygon));
+  }
+
+  return false;
+}
+
+function neighborhoodAt(ref) {
+  for (const feature of state.bairrosGeo?.features || []) {
+    if (featureContains(feature, ref)) return feature.properties?.nome || null;
+  }
   return null;
 }
-function setRef(ref){
-  state.ref=ref; refLayer.clearLayers(); L.marker([ref.lat,ref.lng],{icon:refIcon}).addTo(refLayer).bindPopup(`<strong>Local de referência</strong><br>${esc(ref.label)}`).openPopup();
-  const bairro=neighborhoodAt(ref); els.refLabel.innerHTML=`<strong>${esc(ref.label)}</strong>${bairro?`<span>Bairro identificado: ${esc(bairro)}</span>`:''}`;
-  const near=nearest(); els.nearest.hidden=false; els.nearestList.innerHTML=near.map((x,i)=>`<article class="nearest-item"><div class="rank">${i+1}</div><div><strong>${esc(x.u.name)}</strong><span>${esc(x.u.neighborhood)} • ${esc(x.u.city)}</span><small>${esc(x.u.address)}</small><div class="nearest-actions"><button data-nfocus="${x.u.id}">Ver no mapa</button><a href="${route(x.u)}" target="_blank">Rota</a><button data-copy="${x.u.id}">Copiar endereço</button></div></div><div class="distance-pill">${x.d.toFixed(1).replace('.',',')} km*</div></article>`).join('');
-  els.nearestList.querySelectorAll('[data-nfocus]').forEach(b=>b.onclick=()=>selectUnit(b.dataset.nfocus,true));
-  els.nearestList.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>copyUnit(b.dataset.copy));
-  const pts=[[ref.lat,ref.lng],...near.map(x=>[x.u.lat,x.u.lng])]; map.fitBounds(L.latLngBounds(pts),{padding:[55,55],maxZoom:14});
-  if(innerWidth<=900)els.nearest.scrollIntoView({behavior:'smooth',block:'start'});
-}
-function clearRef(){ state.ref=null;refLayer.clearLayers();els.nearest.hidden=true;els.input.value='';fitAll(); }
-async function copyUnit(id){ const u=state.units.find(x=>x.id===id); const text=`${u.name} — ${u.address}, ${u.neighborhood}, ${u.city} - PR.`; try{await navigator.clipboard.writeText(text);toast('Endereço copiado.');}catch{toast(text);} }
 
-async function searchPlace(q){
-  q=q.trim(); if(!q)return toast('Digite um endereço, bairro ou ponto de referência.');
-  busy(true,'Procurando…'); try{ const biased=/paran|curitiba|pinhais|arauc|s[aã]o jos|campo largo|fazenda rio grande/i.test(norm(q))?q:`${q}, Curitiba e Região Metropolitana, PR`; const r=await geocode(biased,5); if(!r.length){els.status.textContent='Não encontrei. Tente rua + bairro ou cidade.';return;} showSuggestions(r); if(r.length===1||r[0].score>=99)choose(r[0]); }catch(e){els.status.textContent='Busca indisponível. Use “Marcar no mapa”.';}finally{busy(false);}
-}
-function showSuggestions(r){ els.suggestions.innerHTML=r.map((x,i)=>`<button class="suggestion" data-i="${i}"><strong>${esc(x.label.split(',')[0])}</strong><span>${esc(x.label)}</span></button>`).join('');els.suggestions.hidden=false;els.status.textContent=r.length>1?'Escolha o resultado correto.':'';els.suggestions.querySelectorAll('button').forEach(b=>b.onclick=()=>choose(r[+b.dataset.i])); }
-function choose(x){els.suggestions.hidden=true;els.status.textContent='';els.input.value=x.label;setRef(x);}
-function busy(v,msg=''){els.searchBtn.disabled=v;els.searchBtn.textContent=v?'Buscando…':'Buscar no mapa';if(msg)els.status.textContent=msg;}
-function myLocation(){ if(!navigator.geolocation)return toast('Localização não disponível.');els.status.textContent='Obtendo localização…';navigator.geolocation.getCurrentPosition(p=>{els.status.textContent='';setRef({lat:p.coords.latitude,lng:p.coords.longitude,label:'Minha localização'});},()=>els.status.textContent='Permissão de localização não concedida.',{enableHighAccuracy:true,timeout:10000}); }
-function pickMode(v=!state.pick){state.pick=v;els.hint.hidden=!v;els.pickBtn.classList.toggle('active',v);els.pickBtn.textContent=v?'✓ Toque no mapa':'⌖ Marcar no mapa';map.getContainer().style.cursor=v?'crosshair':'';}
-function fitAll(){const p=state.units.filter(u=>Number.isFinite(u.lat)).map(u=>[u.lat,u.lng]);p.length?map.fitBounds(L.latLngBounds(p),{padding:[35,35]}):map.setView(CFG.center,CFG.zoom);}
-
-async function geojson(url,params={}){const q=new URLSearchParams({f:'geojson',where:'1=1',outFields:'*',returnGeometry:'true',outSR:'4326',...params});const r=await fetch(`${url}?${q}`);if(!r.ok)throw new Error('camada');return r.json();}
-async function loadBoundaries(){
-  try{
-    state.bairrosGeo=await geojson(CFG.bairros,{outFields:'nome,nm_regional'});
-    bairroLayer=L.geoJSON(state.bairrosGeo,{style:{color:'#dc7443',weight:1.2,opacity:.72,fillColor:'#f1a47f',fillOpacity:.035},onEachFeature:(f,l)=>l.bindTooltip(`<strong>${esc(f.properties?.nome||'Bairro')}</strong>`,{sticky:true})}).addTo(map);
-    bairroLayer.eachLayer(l=>{const n=l.feature?.properties?.nome;if(!n)return;L.marker(l.getBounds().getCenter(),{interactive:false,icon:L.divIcon({className:'',html:`<div class="neighborhood-label">${esc(n)}</div>`,iconSize:[0,0]})}).addTo(bairroLabels);});
-  }catch(e){console.warn('Bairros',e);toast('Mapa carregado sem a camada de bairros.');}
-  try{
-    const g=await geojson(CFG.municipios,{outFields:'nome'}); const keep=new Set(['CURITIBA','ARAUCARIA','SAO JOSE DOS PINHAIS','PINHAIS','CAMPO LARGO','FAZENDA RIO GRANDE']);
-    g.features=(g.features||[]).filter(f=>keep.has(norm(f.properties?.nome||'').toUpperCase()));
-    municipioLayer=L.geoJSON(g,{style:{color:'#486b76',weight:2,dashArray:'7 7',opacity:.55,fillOpacity:0}}).addTo(map);
-    municipioLayer.eachLayer(l=>{const n=l.feature?.properties?.nome;if(!n)return;L.marker(l.getBounds().getCenter(),{interactive:false,icon:L.divIcon({className:'',html:`<div class="city-label">${esc(n)}</div>`,iconSize:[0,0]})}).addTo(municipioLabels);});
-  }catch(e){console.warn('Municípios',e);}
-}
-function toggle(layer,label,btn){ if(!layer)return toast('Camada ainda não disponível.'); const on=map.hasLayer(layer); [layer,label].forEach(x=>on?map.removeLayer(x):x.addTo(map));btn.classList.toggle('active',!on);btn.setAttribute('aria-pressed',String(!on));}
-function toast(t){els.toast.textContent=t;els.toast.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>els.toast.classList.remove('show'),2500);}
-
-function bind(){
-  els.form.onsubmit=e=>{e.preventDefault();searchPlace(els.input.value)}; els.clear.onclick=()=>{els.input.value='';els.suggestions.hidden=true;els.status.textContent='';els.input.focus()};
-  els.locationBtn.onclick=myLocation;els.pickBtn.onclick=()=>pickMode();els.cancelPick.onclick=()=>pickMode(false);els.clearRef.onclick=clearRef;els.fit.onclick=fitAll;
-  els.unitFilter.oninput=()=>{state.filter=els.unitFilter.value;renderUnits()};
-  els.bairrosBtn.onclick=()=>toggle(bairroLayer,bairroLabels,els.bairrosBtn); els.municipiosBtn.onclick=()=>toggle(municipioLayer,municipioLabels,els.municipiosBtn);
-  els.unitsBtn.onclick=()=>{const on=map.hasLayer(unitLayer);on?map.removeLayer(unitLayer):unitLayer.addTo(map);els.unitsBtn.classList.toggle('active',!on);};
-  map.on('click',e=>{if(!state.pick)return;pickMode(false);setRef({lat:e.latlng.lat,lng:e.latlng.lng,label:'Ponto marcado no mapa'})});
+function renderReferenceLabel() {
+  if (!state.ref) return;
+  const neighborhood = neighborhoodAt(state.ref);
+  els.refLabel.innerHTML = `
+    <strong>${esc(state.ref.label)}</strong>
+    ${neighborhood ? `<span>Bairro: ${esc(neighborhood)}</span>` : ''}`;
 }
 
-async function boot(){
-  renderCities();renderUnits();bind();
-  await Promise.allSettled([locateUnits(),loadBoundaries()]);drawUnits();renderUnits();fitAll();
-  const n=state.units.filter(u=>Number.isFinite(u.lat)).length;els.loadingText.textContent=`${n} unidades posicionadas`;setTimeout(()=>els.loading.classList.add('hidden'),250);
-  if(n<state.units.length)toast(`${n} de ${state.units.length} unidades foram posicionadas.`);
+function setReference(ref) {
+  state.ref = ref;
+  refLayer.clearLayers();
+
+  L.marker([ref.lat, ref.lng], { icon: refIcon })
+    .addTo(refLayer)
+    .bindPopup(`<strong>Local de referência</strong><br>${esc(ref.label)}`);
+
+  renderReferenceLabel();
+
+  const nearest = nearestUnits();
+  els.nearest.hidden = false;
+  els.nearestList.innerHTML = nearest.map(({ unit, distance }, index) => `
+    <article class="nearest-item">
+      <div class="rank">${index + 1}</div>
+      <div>
+        <strong>${esc(unit.name)}</strong>
+        <span>${esc(unit.neighborhood)} • ${esc(unit.city)}</span>
+        <small>${esc(unit.address)}</small>
+        <div class="nearest-actions">
+          <button data-nfocus="${unit.id}" type="button">Ver no mapa</button>
+          <a href="${route(unit)}" target="_blank" rel="noopener">Rota</a>
+          <button data-copy="${unit.id}" type="button">Copiar endereço</button>
+        </div>
+      </div>
+      <div class="distance-pill">${distance.toFixed(1).replace('.', ',')} km*</div>
+    </article>`).join('');
+
+  els.nearestList.querySelectorAll('[data-nfocus]').forEach(button => {
+    button.addEventListener('click', () => selectUnit(button.dataset.nfocus, true));
+  });
+  els.nearestList.querySelectorAll('[data-copy]').forEach(button => {
+    button.addEventListener('click', () => copyUnit(button.dataset.copy));
+  });
+
+  const points = [[ref.lat, ref.lng], ...nearest.map(({ unit }) => [unit.lat, unit.lng])];
+  map.fitBounds(L.latLngBounds(points), { padding: [45, 45], maxZoom: 14 });
+
+  if (innerWidth <= 900) {
+    document.querySelector('.map-area')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
+
+function clearReference() {
+  state.ref = null;
+  refLayer.clearLayers();
+  els.nearest.hidden = true;
+  els.input.value = '';
+  fitAll();
+}
+
+async function copyUnit(id) {
+  const unit = state.units.find(item => item.id === id);
+  if (!unit) return;
+
+  const text = `${unit.name} — ${unit.address}, ${unit.neighborhood}, ${unit.city} - PR.`;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Endereço copiado.');
+  } catch {
+    toast(text);
+  }
+}
+
+async function geocode(query, max = 5) {
+  const params = new URLSearchParams({
+    f: 'json',
+    SingleLine: query,
+    outFields: 'Match_addr,City,Subregion,Region,Postal',
+    countryCode: 'BRA',
+    maxLocations: String(max),
+    location: '-49.28,-25.44',
+    distance: '80000'
+  });
+
+  const response = await fetch(`${CFG.geocoder}?${params}`);
+  if (!response.ok) throw new Error('Busca indisponível');
+
+  const json = await response.json();
+  return (json.candidates || [])
+    .map(candidate => ({
+      label: candidate.address,
+      lat: candidate.location?.y,
+      lng: candidate.location?.x,
+      score: candidate.score
+    }))
+    .filter(result => Number.isFinite(result.lat) && Number.isFinite(result.lng));
+}
+
+async function searchPlace(query) {
+  const value = query.trim();
+  if (!value) return toast('Digite um endereço, bairro ou ponto de referência.');
+
+  setSearchBusy(true, 'Procurando…');
+
+  try {
+    const normalized = norm(value);
+    const hasRegion = /paran|curitiba|pinhais|arauc|sao jos|campo largo|fazenda rio grande/i.test(normalized);
+    const biased = hasRegion ? value : `${value}, Curitiba e Região Metropolitana, PR`;
+    const results = await geocode(biased, 5);
+
+    if (!results.length) {
+      els.status.textContent = 'Não encontrei. Tente rua + bairro ou cidade.';
+      return;
+    }
+
+    showSuggestions(results);
+    if (results.length === 1 || results[0].score >= 99) chooseSuggestion(results[0]);
+  } catch {
+    els.status.textContent = 'Busca indisponível no momento. Tente novamente.';
+  } finally {
+    setSearchBusy(false);
+  }
+}
+
+function showSuggestions(results) {
+  els.suggestions.innerHTML = results
+    .map((result, index) => `
+      <button class="suggestion" data-index="${index}" type="button">
+        <strong>${esc(result.label.split(',')[0])}</strong>
+        <span>${esc(result.label)}</span>
+      </button>`)
+    .join('');
+
+  els.suggestions.hidden = false;
+  els.status.textContent = results.length > 1 ? 'Escolha o resultado correto.' : '';
+
+  els.suggestions.querySelectorAll('button').forEach(button => {
+    button.addEventListener('click', () => chooseSuggestion(results[Number(button.dataset.index)]));
+  });
+}
+
+function chooseSuggestion(result) {
+  els.suggestions.hidden = true;
+  els.status.textContent = '';
+  els.input.value = result.label;
+  setReference(result);
+}
+
+function setSearchBusy(active, message = '') {
+  els.searchBtn.disabled = active;
+  els.searchBtn.textContent = active ? 'Buscando…' : 'Buscar no mapa';
+  if (message) els.status.textContent = message;
+}
+
+function fitAll() {
+  const points = state.units
+    .filter(unit => Number.isFinite(unit.lat) && Number.isFinite(unit.lng))
+    .map(unit => [unit.lat, unit.lng]);
+
+  if (points.length) {
+    map.fitBounds(L.latLngBounds(points), {
+      padding: innerWidth <= 900 ? [20, 20] : [35, 35]
+    });
+  } else {
+    map.setView(CFG.center, CFG.zoom);
+  }
+}
+
+async function fetchGeoJSON(url, params = {}) {
+  const query = new URLSearchParams({
+    f: 'geojson',
+    where: '1=1',
+    outFields: 'nome',
+    returnGeometry: 'true',
+    outSR: '4326',
+    geometryPrecision: '5',
+    ...params
+  });
+
+  const response = await fetch(`${url}?${query}`);
+  if (!response.ok) throw new Error('Camada indisponível');
+  return response.json();
+}
+
+function setLayerReady(button, ready, active = false) {
+  button.disabled = !ready;
+  button.classList.toggle('active', active);
+  button.setAttribute('aria-pressed', String(active));
+}
+
+async function loadBoundaries() {
+  setLayerReady(els.bairrosBtn, false, false);
+  setLayerReady(els.municipiosBtn, false, false);
+
+  const [bairrosResult, municipiosResult] = await Promise.allSettled([
+    fetchGeoJSON(CFG.bairros, { outFields: 'nome' }),
+    fetchGeoJSON(CFG.municipios, { outFields: 'nome', geometryPrecision: '4' })
+  ]);
+
+  if (bairrosResult.status === 'fulfilled') {
+    state.bairrosGeo = bairrosResult.value;
+    bairroLayer = L.geoJSON(state.bairrosGeo, {
+      interactive: true,
+      style: {
+        color: '#d77b4a',
+        weight: 1,
+        opacity: 0.58,
+        fillOpacity: 0
+      },
+      onEachFeature: (feature, layer) => {
+        const name = feature.properties?.nome;
+        if (name) layer.bindTooltip(esc(name), { sticky: true, direction: 'top' });
+      }
+    }).addTo(map);
+    setLayerReady(els.bairrosBtn, true, true);
+    renderReferenceLabel();
+  } else {
+    setLayerReady(els.bairrosBtn, true, false);
+  }
+
+  if (municipiosResult.status === 'fulfilled') {
+    const keep = new Set([
+      'curitiba',
+      'araucaria',
+      'sao jose dos pinhais',
+      'pinhais',
+      'campo largo',
+      'fazenda rio grande'
+    ]);
+
+    const data = municipiosResult.value;
+    data.features = (data.features || []).filter(feature =>
+      keep.has(norm(feature.properties?.nome || ''))
+    );
+
+    municipioLayer = L.geoJSON(data, {
+      interactive: false,
+      style: {
+        color: '#64808a',
+        weight: 1.35,
+        dashArray: '6 6',
+        opacity: 0.42,
+        fillOpacity: 0
+      }
+    }).addTo(map);
+
+    setLayerReady(els.municipiosBtn, true, true);
+  } else {
+    setLayerReady(els.municipiosBtn, true, false);
+  }
+}
+
+function toggleLayer(layer, button) {
+  if (!layer) return;
+  const active = map.hasLayer(layer);
+
+  if (active) map.removeLayer(layer);
+  else layer.addTo(map);
+
+  button.classList.toggle('active', !active);
+  button.setAttribute('aria-pressed', String(!active));
+}
+
+function toast(text) {
+  els.toast.textContent = text;
+  els.toast.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => els.toast.classList.remove('show'), 2200);
+}
+
+function lockPageZoomOutsideMap() {
+  const mapElement = $('#map');
+  if (!mapElement) return;
+
+  const isInsideMap = target => target instanceof Node && mapElement.contains(target);
+
+  for (const eventName of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(eventName, event => {
+      if (!isInsideMap(event.target)) event.preventDefault();
+    }, { passive: false });
+  }
+
+  document.addEventListener('touchmove', event => {
+    if (event.touches.length > 1 && !isInsideMap(event.target)) event.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('wheel', event => {
+    if (event.ctrlKey && !isInsideMap(event.target)) event.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('keydown', event => {
+    const zoomKey = ['+', '-', '=', '0'].includes(event.key);
+    const modified = event.ctrlKey || event.metaKey;
+    if (zoomKey && modified && !isInsideMap(document.activeElement)) event.preventDefault();
+  });
+}
+
+function bind() {
+  els.form.addEventListener('submit', event => {
+    event.preventDefault();
+    searchPlace(els.input.value);
+  });
+
+  els.clear.addEventListener('click', () => {
+    els.input.value = '';
+    els.suggestions.hidden = true;
+    els.status.textContent = '';
+    els.input.focus();
+  });
+
+  els.clearRef.addEventListener('click', clearReference);
+  els.fit.addEventListener('click', fitAll);
+
+  els.unitFilter.addEventListener('input', () => {
+    state.filter = els.unitFilter.value;
+    renderUnits();
+  });
+
+  els.bairrosBtn.addEventListener('click', () => toggleLayer(bairroLayer, els.bairrosBtn));
+  els.municipiosBtn.addEventListener('click', () => toggleLayer(municipioLayer, els.municipiosBtn));
+
+  els.unitsBtn.addEventListener('click', () => {
+    const active = map.hasLayer(unitLayer);
+    if (active) map.removeLayer(unitLayer);
+    else unitLayer.addTo(map);
+    els.unitsBtn.classList.toggle('active', !active);
+    els.unitsBtn.setAttribute('aria-pressed', String(!active));
+  });
+}
+
+function deferBoundaries() {
+  const start = () => loadBoundaries().catch(error => console.warn('Camadas', error));
+
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(start, { timeout: 1200 });
+  } else {
+    setTimeout(start, 350);
+  }
+}
+
+function boot() {
+  lockPageZoomOutsideMap();
+  drawUnits();
+  renderCities();
+  renderUnits();
+  bind();
+  fitAll();
+
+  setLayerReady(els.bairrosBtn, false, false);
+  setLayerReady(els.municipiosBtn, false, false);
+  els.unitsBtn.classList.add('active');
+  els.unitsBtn.setAttribute('aria-pressed', 'true');
+
+  requestAnimationFrame(() => map.invalidateSize(false));
+  deferBoundaries();
+}
+
 boot();
