@@ -1,0 +1,9 @@
+{
+  "name": "UnimedLab • Mapa de unidades",
+  "short_name": "UnimedLab Mapa",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#edf3f2",
+  "theme_color": "#0f5f5a",
+  "description": "Mapa de apoio para localizar unidades da Unimed Laboratório em Curitiba e Região Metropolitana."
+}
