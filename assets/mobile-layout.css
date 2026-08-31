@@ -86,6 +86,10 @@ input {
 
   .search-input-wrap input {
     height: 46px;
+  }
+
+  .search-input-wrap input,
+  .unit-search-wrap input {
     font-size: 16px;
   }
 
