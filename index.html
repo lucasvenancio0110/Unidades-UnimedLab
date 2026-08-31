@@ -43,9 +43,9 @@
             </div>
             <button class="primary-btn" id="searchButton" type="submit">Buscar no mapa</button>
           </form>
-          <div class="quick-actions" style="grid-template-columns: 1fr;">
-            <button class="secondary-btn" id="myLocationButton" type="button" hidden aria-hidden="true" tabindex="-1"></button>
-            <button class="secondary-btn" id="clickMapModeButton" type="button"><span aria-hidden="true">⌖</span> Marcar no mapa</button>
+          <div class="quick-actions" hidden aria-hidden="true">
+            <button class="secondary-btn" id="myLocationButton" type="button" tabindex="-1"></button>
+            <button class="secondary-btn" id="clickMapModeButton" type="button" tabindex="-1"></button>
           </div>
           <div id="searchStatus" class="search-status" aria-live="polite"></div>
           <div id="searchSuggestions" class="suggestions" hidden></div>
@@ -92,7 +92,7 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.2.0/turf.min.js"></script>
   <script type="module" src="./assets/app.js"></script>
 </body>
