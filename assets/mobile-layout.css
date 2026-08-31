@@ -1,6 +1,37 @@
-/* Mobile map-first layout
-   Mantém o mapa como área principal durante o atendimento e deixa
-   o painel de referência mais abaixo, como um bottom sheet. */
+/* App-like interaction: the page scrolls normally, but pinch/double-tap zoom
+   is reserved for the Leaflet map. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body,
+.app-shell,
+.workspace,
+.panel {
+  touch-action: pan-y;
+}
+
+button,
+a,
+input {
+  touch-action: manipulation;
+}
+
+#map,
+.leaflet-container {
+  touch-action: none;
+}
+
+.map-chip:disabled {
+  opacity: .34;
+  cursor: progress;
+}
+
+.leaflet-control-attribution {
+  opacity: .62;
+  font-size: 8px !important;
+}
 
 @media (max-width: 900px) {
   .workspace {
@@ -8,55 +39,106 @@
   }
 
   .map-area {
-    /* Antes: 52vh. Agora o mapa ocupa quase toda a primeira tela. */
-    height: 72svh;
-    min-height: 520px;
-    max-height: 760px;
+    height: 76svh;
+    min-height: 540px;
+    max-height: 820px;
     flex: 0 0 auto;
+    border-bottom: 0;
   }
 
   .panel {
-    padding-top: 0;
+    padding: 0 12px 12px;
+    overflow: visible;
   }
 
   .search-card {
-    /* Pequena sobreposição para manter a sensação de bottom sheet,
-       sem cobrir uma parte relevante do mapa. */
-    margin-top: -16px;
-    padding-top: 22px;
-    border-radius: 24px 24px 20px 20px;
+    margin-top: -12px;
+    padding: 20px 14px 15px;
+    border-radius: 24px 24px 18px 18px;
+    box-shadow: 0 12px 30px rgba(20, 56, 51, .13);
   }
 
   .search-card::before {
     content: "";
     display: block;
-    width: 44px;
+    width: 42px;
     height: 5px;
-    margin: -10px auto 13px;
+    margin: -9px auto 13px;
     border-radius: 999px;
-    background: #d4dfdd;
+    background: #d8e1df;
   }
 
-  .map-hint {
-    bottom: 18px;
+  .search-card .section-heading {
+    margin-bottom: 10px;
+  }
+
+  .search-card .eyebrow {
+    font-size: 10px;
+  }
+
+  .search-card h3 {
+    font-size: 18px;
+  }
+
+  .search-form {
+    gap: 9px;
+  }
+
+  .search-input-wrap input {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .primary-btn {
+    height: 44px;
+  }
+
+  .search-status {
+    margin-top: 7px;
+  }
+
+  .map-toolbar {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    transform: none;
+    max-width: none;
+    gap: 6px;
+  }
+
+  .map-chip {
+    height: 36px;
+    padding: 0 11px;
+    font-size: 11px;
+    box-shadow: 0 6px 18px rgba(20, 56, 51, .08);
+  }
+
+  .nearest-card,
+  .units-card {
+    border-radius: 18px;
+    box-shadow: 0 8px 20px rgba(20, 56, 51, .06);
   }
 }
 
 @media (max-width: 480px) {
   .map-area {
-    height: 74svh;
-    min-height: 540px;
+    height: 78svh;
+    min-height: 560px;
+  }
+
+  .panel {
+    padding-left: 10px;
+    padding-right: 10px;
   }
 
   .search-card {
-    margin-top: -14px;
+    margin-top: -10px;
   }
 }
 
-/* Em telas muito baixas, evita um mapa exageradamente alto. */
 @media (max-width: 900px) and (max-height: 700px) {
   .map-area {
-    height: 68svh;
-    min-height: 455px;
+    height: 72svh;
+    min-height: 470px;
   }
 }
